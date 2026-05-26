@@ -1,20 +1,24 @@
 /**
- * model-client — calls the supervisor LLM using pi's internal agent session API.
+ * model-client — calls the supervisor LLM using OMP's agent session API.
  *
  * callModel        — low-level: returns raw response text
  * callSupervisorModel — high-level: parses response as SteeringDecision
  */
 
 import {
-  createAgentSession,
-  DefaultResourceLoader,
+  AgentSession,
   SessionManager,
-} from "@mariozechner/pi-coding-agent";
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
-import type { SteeringDecision } from "./types.js";
+  Settings,
+} from "@oh-my-pi/pi-coding-agent";
+import { Agent, convertToLlm } from "@oh-my-pi/pi-agent-core";
+import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import type { SteeringDecision } from "./types";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 /**
- * Run a one-shot LLM call using pi's internal agent session.
+ * Run a one-shot LLM call using OMP's Agent + AgentSession.
  * Returns the raw response text, or null on failure.
  */
 export async function callModel(
@@ -29,37 +33,41 @@ export async function callModel(
   const model = ctx.modelRegistry.find(provider, modelId);
   if (!model) return null;
 
-  const loader = new DefaultResourceLoader({
-    noExtensions: true,
-    noSkills: true,
-    noPromptTemplates: true,
-    noThemes: true,
-    systemPromptOverride: () => systemPrompt,
-  });
-  await loader.reload();
+  // Get API key for the provider — the streamFn uses this
+  const getApiKey = () => {
+    const key = ctx.modelRegistry.getApiKeyForProvider?.(provider);
+    return key ?? "";
+  };
 
-  let session: Awaited<ReturnType<typeof createAgentSession>>["session"];
-  try {
-    const result = await createAgentSession({
-      sessionManager: SessionManager.inMemory(),
-      modelRegistry: ctx.modelRegistry,
+  const agent = new Agent({
+    getApiKey,
+    initialState: {
       model,
+      systemPrompt: [systemPrompt],
       tools: [],
-      resourceLoader: loader,
-    });
-    session = result.session;
-  } catch {
-    return null;
-  }
+      messages: [],
+    },
+    convertToLlm,
+    streamFn: (model as any).stream?.bind(model),
+  });
+
+  const tempDir = mkdtempSync(join(tmpdir(), "omp-supervisor-"));
+  const session = new AgentSession({
+    agent,
+    sessionManager: SessionManager.inMemory(tempDir),
+    settings: Settings.isolated({ "compaction.enabled": false }),
+    modelRegistry: ctx.modelRegistry,
+    toolRegistry: new Map(),
+  });
 
   const onAbort = () => session.abort();
   signal?.addEventListener("abort", onAbort, { once: true });
 
   let responseText = "";
-  const unsubscribe = session.subscribe((event) => {
+  const unsubscribe = session.subscribe((event: any) => {
     if (
       event.type === "message_update" &&
-      event.assistantMessageEvent.type === "text_delta"
+      event.assistantMessageEvent?.type === "text_delta"
     ) {
       responseText += event.assistantMessageEvent.delta;
       onDelta?.(responseText);
@@ -74,6 +82,7 @@ export async function callModel(
     unsubscribe();
     signal?.removeEventListener("abort", onAbort);
     session.dispose();
+    try { rmSync(tempDir, { recursive: true, force: true }); } catch {}
   }
 
   return responseText;

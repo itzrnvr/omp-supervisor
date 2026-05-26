@@ -10,15 +10,14 @@
  *   /supervise sensitivity <low|medium|high> — adjust steering sensitivity
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { SupervisorStateManager, DEFAULT_PROVIDER, DEFAULT_MODEL_ID, DEFAULT_SENSITIVITY } from "./state.js";
-import { analyze, loadSystemPrompt } from "./engine.js";
-import { updateUI, toggleWidget, isWidgetVisible, type WidgetAction } from "./ui/status-widget.js";
-import { pickModel } from "./ui/model-picker.js";
-import { openSettings } from "./ui/settings-panel.js";
-import { loadWorkspaceModel, saveWorkspaceModel } from "./workspace-config.js";
-import type { Sensitivity } from "./types.js";
-import { Type } from "@sinclair/typebox";
+import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import { SupervisorStateManager, DEFAULT_PROVIDER, DEFAULT_MODEL_ID, DEFAULT_SENSITIVITY } from "./state";
+import { analyze, loadSystemPrompt } from "./engine";
+import { updateUI, toggleWidget, isWidgetVisible, type WidgetAction } from "./ui/status-widget";
+import { pickModel } from "./ui/model-picker";
+import { openSettings } from "./ui/settings-panel";
+import { loadWorkspaceModel, saveWorkspaceModel } from "./workspace-config";
+import type { Sensitivity } from "./types";
 
 /**
  * Extract partial reasoning text from the supervisor's streaming JSON response.
@@ -42,9 +41,17 @@ function extractThinking(accumulated: string): string {
 const MAX_IDLE_STEERS = 5;
 
 export default function (pi: ExtensionAPI) {
+  const z = pi.zod;
   const state = new SupervisorStateManager(pi);
   let currentCtx: ExtensionContext | undefined;
+
   let idleSteers = 0; // consecutive agent_end steers; reset on done/stop/new supervision
+
+  // ---- Message delivery ----
+  // Uses pi.sendUserMessage directly (OMP preserves this API).
+  //   turn_end (mid-conversation): deliverAs "steer"
+  //   agent_end (agent idle):      no deliverAs (default prompt delivery)
+
 
   // ---- Session lifecycle: restore state ----
 
@@ -54,14 +61,14 @@ export default function (pi: ExtensionAPI) {
     updateUI(ctx, state.getState());
   };
 
-  pi.on("session_start", async (_event, ctx) => onSessionLoad(ctx));
-  pi.on("session_switch", async (_event, ctx) => onSessionLoad(ctx));
-  pi.on("session_fork", async (_event, ctx) => onSessionLoad(ctx));
-  pi.on("session_tree", async (_event, ctx) => onSessionLoad(ctx));
+  pi.on("session_start", async (_event: any, ctx: any) => onSessionLoad(ctx));
+  pi.on("session_switch", async (_event: any, ctx: any) => onSessionLoad(ctx));
+  pi.on("session_branch" as any, async (_event: any, ctx: any) => onSessionLoad(ctx));
+  pi.on("session_tree", async (_event: any, ctx: any) => onSessionLoad(ctx));
 
   // ---- Keep ctx fresh ----
 
-  pi.on("turn_start", async (_event, ctx) => {
+  pi.on("turn_start", async (_event: any, ctx: any) => {
     currentCtx = ctx;
   });
 
@@ -98,6 +105,7 @@ export default function (pi: ExtensionAPI) {
       });
       updateUI(ctx, state.getState(), { type: "steering", message: decision.message });
       pi.sendUserMessage(decision.message, { deliverAs: "steer" });
+
     }
   });
 
@@ -105,7 +113,7 @@ export default function (pi: ExtensionAPI) {
   // agent_end fires once per user prompt, always with the agent idle and waiting for input.
   // This is the critical checkpoint for all sensitivity levels.
 
-  pi.on("agent_end", async (_event, ctx) => {
+  pi.on("agent_end", async (_event: any, ctx: any) => {
     currentCtx = ctx;
     if (!state.isActive()) return;
 
@@ -132,6 +140,7 @@ export default function (pi: ExtensionAPI) {
       });
       updateUI(ctx, state.getState(), { type: "steering", message: decision.message });
       pi.sendUserMessage(decision.message);
+
     } else if (decision.action === "done") {
       idleSteers = 0;
       updateUI(ctx, state.getState(), { type: "done" });
@@ -350,26 +359,23 @@ export default function (pi: ExtensionAPI) {
       "Activate the supervisor to track the conversation toward a specific outcome. " +
       "The supervisor will observe every turn and steer the agent if it drifts. " +
       "Once supervision is active it is locked — only the user can change or stop it.",
-    parameters: Type.Object({
-      outcome: Type.String({
-        description:
-          "The desired end-state to supervise toward. Be specific and measurable " +
-          "(e.g. 'Implement JWT auth with refresh tokens and full test coverage').",
-      }),
-      sensitivity: Type.Optional(Type.Union([
-        Type.Literal("low"),
-        Type.Literal("medium"),
-        Type.Literal("high"),
-      ], {
-        description:
-          "How aggressively to steer. low = only when seriously off track, " +
-          "medium = on mild drift (default), high = proactively + mid-turn checks.",
-      })),
-      model: Type.Optional(Type.String({
-        description:
-          "Supervisor model as 'provider/modelId' (e.g. 'anthropic/claude-haiku-4-5-20251001'). " +
-          "Defaults to workspace config, then the active chat model.",
-      })),
+    parameters: z.object({
+      outcome: z.string().describe(
+        "The desired end-state to supervise toward. Be specific and measurable " +
+        "(e.g. 'Implement JWT auth with refresh tokens and full test coverage')."
+      ),
+      sensitivity: z.union([
+        z.literal("low"),
+        z.literal("medium"),
+        z.literal("high"),
+      ]).optional().describe(
+        "How aggressively to steer. low = only when seriously off track, " +
+        "medium = on mild drift (default), high = proactively + mid-turn checks."
+      ),
+      model: z.string().optional().describe(
+        "Supervisor model as 'provider/modelId' (e.g. 'anthropic/claude-haiku-4-5-20251001'). " +
+        "Defaults to workspace config, then the active chat model."
+      ),
     }),
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
       const text = (msg: string) => ({ content: [{ type: "text" as const, text: msg }], details: undefined });

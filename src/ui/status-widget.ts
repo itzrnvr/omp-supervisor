@@ -8,9 +8,9 @@
  * Toggle visibility with toggleWidget().
  */
 
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { truncateToWidth } from "@mariozechner/pi-tui";
-import type { SupervisorState } from "../types.js";
+import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import { truncateToWidth } from "@oh-my-pi/pi-tui";
+import type { SupervisorState } from "../types";
 
 const WIDGET_ID = "supervisor";
 const STATUS_ID = "supervisor";

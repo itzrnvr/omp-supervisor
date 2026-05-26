@@ -35,6 +35,6 @@ export interface SteeringDecision {
 
 /** A simplified message for building the supervisor context */
 export interface ConversationMessage {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "tool";
   content: string;
 }

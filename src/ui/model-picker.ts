@@ -4,9 +4,9 @@
  * sees when pressing Ctrl+P in pi, with search and API-key availability.
  */
 
-import { ModelSelectorComponent, SettingsManager } from "@mariozechner/pi-coding-agent";
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
-import type { Model } from "@mariozechner/pi-ai";
+import { ModelSelectorComponent, Settings } from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import type { Model } from "@oh-my-pi/pi-ai";
 
 /**
  * Open the interactive model picker.
@@ -24,21 +24,22 @@ export async function pickModel(
       : undefined;
 
   // Minimal in-memory settings — we only need the selector, not persistence
-  const settingsManager = SettingsManager.inMemory();
+  const settings = Settings.isolated();
 
   return ctx.ui.custom<Model<any> | null>((tui, _theme, _kb, done) => {
     const component = new ModelSelectorComponent(
       tui,
       currentModel,
-      settingsManager,
+      settings,
       ctx.modelRegistry,
       [], // no scoped-model cycling — we want the full model list
       (model) => done(model),
       () => done(null)
     );
 
-    // Give focus so the search input is active immediately
-    component.focused = true;
+    // Focus the search input so the user can type immediately
+    const searchInput = (component as any).getSearchInput?.();
+    if (searchInput) tui.setFocus(searchInput);
 
     return {
       render: (width) => component.render(width),

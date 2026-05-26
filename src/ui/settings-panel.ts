@@ -7,11 +7,11 @@
  * Opened via `/supervise` (no args) or `/supervise settings`.
  */
 
-import { SettingsList, type SettingItem, type SettingsListTheme } from "@mariozechner/pi-tui";
-import { ModelSelectorComponent, SettingsManager } from "@mariozechner/pi-coding-agent";
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
-import type { SupervisorState, Sensitivity } from "../types.js";
-import { isWidgetVisible } from "./status-widget.js";
+import { SettingsList, type SettingItem, type SettingsListTheme } from "@oh-my-pi/pi-tui";
+import { ModelSelectorComponent, Settings } from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import type { SupervisorState, Sensitivity } from "../types";
+import { isWidgetVisible } from "./status-widget";
 
 const SENSITIVITIES: Sensitivity[] = ["low", "medium", "high"];
 
@@ -52,11 +52,11 @@ export async function openSettings(
         ? [currentValue.split("/")[0], currentValue.split("/").slice(1).join("/")]
         : [currentProvider, currentValue];
       const currentModel = ctx.modelRegistry.find(prov, mid);
-      const settingsManager = SettingsManager.inMemory();
+      const settings = Settings.isolated();
       const component = new ModelSelectorComponent(
         tui,
         currentModel,
-        settingsManager,
+        settings,
         ctx.modelRegistry,
         [],
         (model) => {
@@ -65,7 +65,8 @@ export async function openSettings(
         },
         () => submenuDone(),
       );
-      component.focused = true;
+      const searchInput = (component as any).getSearchInput?.();
+      if (searchInput) tui.setFocus(searchInput);
       return component;
     };
 

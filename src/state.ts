@@ -2,8 +2,8 @@
  * SupervisorStateManager — manages in-memory supervisor state and session persistence.
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import type { SupervisorState, SupervisorIntervention, Sensitivity } from "./types.js";
+import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import type { SupervisorState, SupervisorIntervention, Sensitivity } from "./types";
 
 const ENTRY_TYPE = "supervisor-state";
 

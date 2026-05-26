@@ -1,40 +1,53 @@
 {
-  "name": "pi-supervisor",
-  "version": "0.4.2",
-  "description": "A pi extension that supervises the chat and steers it towards a defined outcome",
+  "name": "@itzrnvr/omp-supervisor",
+  "version": "0.5.0-omp1",
+  "description": "An oh-my-pi (OMP) extension that supervises the coding agent and steers it toward a defined outcome",
   "author": "tintinweb",
   "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun run test-harness.ts && bun run test-interactive.ts",
+    "test:noninteractive": "bun run test-harness.ts",
+    "test:interactive": "bun run test-interactive.ts"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/tintinweb/pi-supervisor.git"
+    "url": "https://github.com/itzrnvr/pi-supervisor.git"
   },
-  "homepage": "https://github.com/tintinweb/pi-supervisor#readme",
+  "homepage": "https://github.com/itzrnvr/pi-supervisor#readme",
   "bugs": {
-    "url": "https://github.com/tintinweb/pi-supervisor/issues"
+    "url": "https://github.com/itzrnvr/pi-supervisor/issues"
   },
   "keywords": [
-    "pi-package",
-    "pi",
-    "pi-extension",
+    "omp-package",
+    "omp-extension",
+    "oh-my-pi",
     "supervisor",
     "steering",
     "outcome",
     "agent",
     "productivity"
   ],
-  "dependencies": {
-    "@mariozechner/pi-coding-agent": "latest",
-    "@mariozechner/pi-tui": "latest",
-    "@mariozechner/pi-ai": "latest",
-    "@sinclair/typebox": "latest"
+  "peerDependencies": {
+    "@oh-my-pi/pi-coding-agent": "*",
+    "@oh-my-pi/pi-ai": "*",
+    "@oh-my-pi/pi-tui": "*",
+    "@oh-my-pi/pi-agent-core": "*"
   },
   "devDependencies": {
+    "@types/node": "^20.0.0",
     "typescript": "^5.0.0",
-    "@types/node": "^20.0.0"
+    "omp-test-harness": "file:../omp-test-harness"
+  },
+  "omp": {
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "pi": {
-    "extensions": ["./src/index.ts"],
-    "video": "https://github.com/tintinweb/pi-supervisor/raw/master/media/demo.mp4",
-    "image": "https://github.com/tintinweb/pi-supervisor/raw/master/media/screenshot.png"
+    "extensions": [
+      "./src/index.ts"
+    ]
   }
 }
