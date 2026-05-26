@@ -158,19 +158,34 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("supervise", {
     description: "Supervise the chat toward a desired outcome (/supervise <outcome>)",
     getArgumentCompletions: (prefix: string) => {
+      // Second-level: /supervise sensitivity <low|medium|high>
+      if (prefix.startsWith("sensitivity ")) {
+        const sub = prefix.slice("sensitivity ".length).toLowerCase();
+        const levels = [
+          { value: "low", label: "low", description: "Only steer when seriously off track" },
+          { value: "medium", label: "medium", description: "On mild drift (default)" },
+          { value: "high", label: "high", description: "Proactively + mid-turn checks" },
+        ];
+        const matches = levels.filter(l => l.value.startsWith(sub));
+        return matches.length > 0 ? matches : null;
+      }
+
+      // Second-level: /supervise model <provider/modelId> — too dynamic to enumerate, skip
+      if (prefix.includes(" ")) return null;
+
+      // First-level: /supervise <subcommand>
       const subcommands = [
         { name: "stop", description: "Stop active supervision" },
         { name: "status", description: "Show current state / open settings" },
         { name: "widget", description: "Toggle the status widget" },
-        { name: "model", description: "Open model picker or set model" },
-        { name: "sensitivity", description: "Set steering sensitivity" },
+        { name: "model", description: "Open model picker or set model directly", usage: "<provider/modelId>" },
+        { name: "sensitivity", description: "Set steering sensitivity", usage: "<low|medium|high>" },
         { name: "settings", description: "Open the interactive settings panel" },
       ];
-      if (prefix.includes(" ")) return null;
       const lower = prefix.toLowerCase();
       const matches = subcommands
         .filter(s => s.name.startsWith(lower))
-        .map(s => ({ value: `${s.name} `, label: s.name, description: s.description }));
+        .map(s => ({ value: `${s.name} `, label: s.name, description: s.description, hint: s.usage }));
       return matches.length > 0 ? matches : null;
     },
     handler: async (args, ctx) => {

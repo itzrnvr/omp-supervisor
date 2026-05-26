@@ -65,8 +65,8 @@ export async function openSettings(
         },
         () => submenuDone(),
       );
-      const searchInput = (component as any).getSearchInput?.();
-      if (searchInput) tui.setFocus(searchInput);
+      // ModelSelectorComponent handles its own internal focus routing;
+      // external tui.setFocus() breaks escape/arrow key handling.
       return component;
     };
 

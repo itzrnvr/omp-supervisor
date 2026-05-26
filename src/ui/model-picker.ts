@@ -36,11 +36,10 @@ export async function pickModel(
       (model) => done(model),
       () => done(null)
     );
-
-    // Focus the search input so the user can type immediately
-    const searchInput = (component as any).getSearchInput?.();
-    if (searchInput) tui.setFocus(searchInput);
-
+    // ModelSelectorComponent handles its own internal focus routing
+    // (arrow keys → list, typing → search input, escape → cancel).
+    // Do NOT call tui.setFocus() here — it hijacks the parent TUI's
+    // key dispatch and breaks escape/arrow handling.
     return {
       render: (width) => component.render(width),
       invalidate: () => component.invalidate(),
