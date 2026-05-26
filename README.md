@@ -1,6 +1,6 @@
-# pi-supervisor
+# omp-supervisor
 
-A [pi](https://pi.dev) extension that supervises the coding agent and steers it toward a defined outcome. It observes every conversation turn, injects guiding messages when the agent drifts, and signals when the goal is reached — like a tech lead watching over a dev's shoulder.
+An [oh-my-pi](https://github.com/can1357/oh-my-pi) extension that supervises the coding agent and steers it toward a defined outcome. It observes every conversation turn, injects guiding messages when the agent drifts, and signals when the goal is reached — like a tech lead watching over a dev's shoulder.
 
 > A supervisor as the intelligent overseer keeping the agent on track.
 
@@ -24,18 +24,18 @@ Then start the conversation normally — the supervisor watches from outside wit
 2. **Mid-run, between tool calls** — also checks for drift on `medium` and `high` sensitivity and can steer the agent without waiting for it to finish
 3. **On completion** — supervisor signals done and stops automatically
 
-The supervisor is a pure outside observer. It runs in a separate in-memory pi session sharing only the API credentials and never touches the main agent's context window or system prompt.
+The supervisor is a pure outside observer. It runs in a separate in-memory OMP session sharing only the API credentials and never touches the main agent's context window or system prompt.
 
 ## Install
 
 ```bash
-pi install npm:pi-supervisor
+omp install npm:omp-supervisor
 ```
 
 Or load directly for development:
 
 ```bash
-pi -e ~/projects/pi-supervisor/src/index.ts
+omp -e ~/projects/omp-supervisor/src/index.ts
 ```
 
 ## Commands
@@ -57,7 +57,7 @@ pi -e ~/projects/pi-supervisor/src/index.ts
 /supervise Refactor the auth module to use dependency injection and add 90% test coverage
 
 /supervise model
-# Opens pi's model selector — pick any model with a configured API key
+# Opens OMP's model selector — pick any model with a configured API key
 
 /supervise sensitivity low
 # Only steer when seriously off track
@@ -132,7 +132,7 @@ If the supervisor sends **5 consecutive steering messages** without declaring th
 
 The supervisor's reasoning is controlled by its **system prompt** — not the goal. The goal is always set at runtime via `/supervise <outcome>`. `SUPERVISOR.md` defines *how* the supervisor thinks: its rules, persona, and project-specific constraints.
 
-**Discovery order** (mirrors pi's `SYSTEM.md` convention):
+**Discovery order** (mirrors OMP's `SYSTEM.md` convention):
 
 | Priority | Location | Use for |
 |---|---|---|
@@ -215,7 +215,7 @@ Response schema (strict JSON, required):
 
 ## Session Persistence
 
-Supervision state (outcome, model, sensitivity, intervention history) is stored in the pi session file and restored automatically on restart, session switch, fork, and tree navigation.
+Supervision state (outcome, model, sensitivity, intervention history) is stored in the OMP session file and restored automatically on restart, session switch, branch, and tree navigation.
 
 ## Project Structure
 
@@ -225,11 +225,11 @@ src/
   types.ts              # SupervisorState, SteeringDecision, ConversationMessage
   state.ts              # SupervisorStateManager — in-memory state + session persistence
   engine.ts             # Snapshot building, SUPERVISOR.md loading, prompt construction, analyze()
-  model-client.ts       # One-shot supervisor LLM calls via pi's AgentSession API
+  model-client.ts       # One-shot supervisor LLM calls via OMP's Agent + AgentSession API
   workspace-config.ts   # .pi/supervisor-config.json read/write for model persistence
   ui/
     status-widget.ts    # 🎯 footer badge + one-line widget with live thinking stream
-    model-picker.ts     # Interactive model picker using pi's ModelSelectorComponent
+    model-picker.ts     # Interactive model picker using OMP's ModelSelectorComponent
     settings-panel.ts   # Interactive settings overlay using pi-tui's SettingsList
 ```
 

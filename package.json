@@ -13,11 +13,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/itzrnvr/pi-supervisor.git"
+    "url": "https://github.com/itzrnvr/omp-supervisor.git"
   },
-  "homepage": "https://github.com/itzrnvr/pi-supervisor#readme",
+  "homepage": "https://github.com/itzrnvr/omp-supervisor#readme",
   "bugs": {
-    "url": "https://github.com/itzrnvr/pi-supervisor/issues"
+    "url": "https://github.com/itzrnvr/omp-supervisor/issues"
   },
   "keywords": [
     "omp-package",

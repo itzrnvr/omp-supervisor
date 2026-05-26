@@ -1,5 +1,5 @@
 /**
- * pi-supervisor — A pi extension that supervises the chat and steers it toward a defined outcome.
+ * omp-supervisor — An oh-my-pi extension that supervises the chat and steers it toward a defined outcome.
  *
  * Commands:
  *   /supervise <outcome>          — start supervising

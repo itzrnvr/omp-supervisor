@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0-omp1] - 2026-05-26
+
+### Changed
+- **Renamed from `pi-supervisor` to `omp-supervisor`** — all documentation, package metadata, and repository URLs updated to reflect the oh-my-pi (OMP) port
+- **Replaced `@mariozechner/*` with `@oh-my-pi/*`** — uses `@oh-my-pi/pi-coding-agent`, `@oh-my-pi/pi-ai`, `@oh-my-pi/pi-tui`, `@oh-my-pi/pi-agent-core`
+- **Replaced TypeBox with Zod** — tool parameters now use `pi.zod` (zod/v4) instead of `@sinclair/typebox`
+- **Replaced `createAgentSession` + `DefaultResourceLoader` with direct `Agent` + `AgentSession`** — the supervisor model call constructs an Agent inline with `initialState` rather than using pi's session factory
+- **Updated event subscriptions** — `session_fork` → `session_branch` (OMP event rename)
+- **Added `ConversationMessage.role: "tool"`** — for OMP tool-result messages in analysis snapshots
+- **Updated `tsconfig.json` moduleResolution** to `bundler`
+- **Added test suite** — 73 tests covering non-interactive, interactive, and e2e scenarios
+
+[0.5.0-omp1]: https://github.com/itzrnvr/pi-supervisor/releases/tag/v0.5.0-omp1
+
 ## [0.4.2] - 2026-03-11
 
 ### Added
@@ -50,7 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - 2026-02-21
 
-Initial release of `pi-supervisor`.
+Initial release of `omp-supervisor`.
 
 ### Added
 - **Supervisor engine** — observes every agent turn and calls a configurable LLM to evaluate progress toward a user-defined outcome

@@ -1,5 +1,5 @@
 /**
- * Core types for the pi-supervisor extension.
+ * Core types for the omp-supervisor extension.
  */
 
 export type Sensitivity = "low" | "medium" | "high";
