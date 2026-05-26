@@ -157,6 +157,22 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand("supervise", {
     description: "Supervise the chat toward a desired outcome (/supervise <outcome>)",
+    getArgumentCompletions: (prefix: string) => {
+      const subcommands = [
+        { name: "stop", description: "Stop active supervision" },
+        { name: "status", description: "Show current state / open settings" },
+        { name: "widget", description: "Toggle the status widget" },
+        { name: "model", description: "Open model picker or set model" },
+        { name: "sensitivity", description: "Set steering sensitivity" },
+        { name: "settings", description: "Open the interactive settings panel" },
+      ];
+      if (prefix.includes(" ")) return null;
+      const lower = prefix.toLowerCase();
+      const matches = subcommands
+        .filter(s => s.name.startsWith(lower))
+        .map(s => ({ value: `${s.name} `, label: s.name, description: s.description }));
+      return matches.length > 0 ? matches : null;
+    },
     handler: async (args, ctx) => {
       currentCtx = ctx;
       const trimmed = args?.trim() ?? "";
