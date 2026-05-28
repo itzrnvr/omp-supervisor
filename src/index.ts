@@ -77,6 +77,11 @@ export default function (pi: ExtensionAPI) {
   // low:    no mid-run checks at all
   // medium: check every 3rd tool cycle (turns 2, 5, 8, …), confidence >= 0.9
   // high:   check every tool cycle from turn 2, confidence >= 0.85
+  //
+  // IMPORTANT: OMP enforces a 30-second timeout on extension event handlers.
+  // The analyze() call makes a real LLM API request which can take >30s,
+  // so we run it in a detached async context — the handler returns immediately
+  // and the analysis + steering completes independently.
 
   pi.on("turn_end", async (event, ctx) => {
     currentCtx = ctx;
@@ -84,29 +89,28 @@ export default function (pi: ExtensionAPI) {
     const s = state.getState()!;
 
     if (s.sensitivity === "low") return;
-    if (event.turnIndex < 2) return; // let the agent settle before intervening
+    if (event.turnIndex < 2) return;
     if (s.sensitivity === "medium" && (event.turnIndex - 2) % 3 !== 0) return;
 
-    let decision;
-    try {
-      decision = await analyze(ctx, s, false /* agent still working */, false /* can't stagnate mid-turn */);
-    } catch {
-      return;
-    }
+    // Snapshot values for the detached closure
+    const snap = { turnCount: s.turnCount, sensitivity: s.sensitivity };
 
-    // Higher bar for medium — less willing to disrupt productive work
-    const threshold = s.sensitivity === "medium" ? 0.9 : 0.85;
-    if (decision.action === "steer" && decision.message && decision.confidence >= threshold) {
-      state.addIntervention({
-        turnCount: s.turnCount,
-        message: decision.message,
-        reasoning: decision.reasoning,
-        timestamp: Date.now(),
-      });
-      updateUI(ctx, state.getState(), { type: "steering", message: decision.message });
-      pi.sendUserMessage(decision.message, { deliverAs: "steer" });
-
-    }
+    // Fire-and-forget: analysis runs outside the handler timeout
+    analyze(ctx, s, false, false).then((decision) => {
+      const threshold = snap.sensitivity === "medium" ? 0.9 : 0.85;
+      if (decision.action === "steer" && decision.message && decision.confidence >= threshold) {
+        state.addIntervention({
+          turnCount: snap.turnCount,
+          message: decision.message,
+          reasoning: decision.reasoning,
+          timestamp: Date.now(),
+        });
+        updateUI(ctx, state.getState(), { type: "steering", message: decision.message });
+        pi.sendUserMessage(decision.message, { deliverAs: "steer" });
+      }
+    }).catch(() => {
+      // Analysis failed — silently continue; agent will be rechecked at agent_end
+    });
   });
 
   // ---- After each agent run: analyze + steer ----
@@ -119,38 +123,48 @@ export default function (pi: ExtensionAPI) {
 
     state.incrementTurnCount();
     const s = state.getState()!;
-
-    // Stagnation: too many steers with no "done" → final lenient evaluation
     const stagnating = idleSteers >= MAX_IDLE_STEERS;
 
     updateUI(ctx, s, { type: "analyzing", turn: s.turnCount });
 
-    const decision = await analyze(ctx, s, true /* always idle at agent_end */, stagnating, undefined, (accumulated) => {
+    // Snapshot values for the detached closure
+    const snap = {
+      turnCount: s.turnCount,
+      outcome: s.outcome,
+      stagnating,
+    };
+
+    // Fire-and-forget: analysis runs outside the handler timeout
+    analyze(ctx, s, true, stagnating, undefined, (accumulated) => {
       const thinking = extractThinking(accumulated);
-      updateUI(ctx, state.getState()!, { type: "analyzing", turn: s.turnCount, thinking });
-    });
-
-    if (decision.action === "steer" && decision.message) {
-      idleSteers++;
-      state.addIntervention({
-        turnCount: s.turnCount,
-        message: decision.message,
-        reasoning: decision.reasoning,
-        timestamp: Date.now(),
-      });
-      updateUI(ctx, state.getState(), { type: "steering", message: decision.message });
-      pi.sendUserMessage(decision.message);
-
-    } else if (decision.action === "done") {
-      idleSteers = 0;
-      updateUI(ctx, state.getState(), { type: "done" });
-      const suffix = stagnating ? ` (stopped after ${MAX_IDLE_STEERS} steering attempts — goal substantially achieved)` : "";
-      ctx.ui.notify(`Supervisor: outcome achieved! "${s.outcome}"${suffix}`, "info");
-      state.stop();
-      updateUI(ctx, state.getState());
-    } else {
+      updateUI(ctx, state.getState()!, { type: "analyzing", turn: snap.turnCount, thinking });
+    }).then((decision) => {
+      if (decision.action === "steer" && decision.message) {
+        idleSteers++;
+        state.addIntervention({
+          turnCount: snap.turnCount,
+          message: decision.message,
+          reasoning: decision.reasoning,
+          timestamp: Date.now(),
+        });
+        updateUI(ctx, state.getState(), { type: "steering", message: decision.message });
+        pi.sendUserMessage(decision.message);
+      } else if (decision.action === "done") {
+        idleSteers = 0;
+        updateUI(ctx, state.getState(), { type: "done" });
+        const suffix = snap.stagnating
+          ? ` (stopped after ${MAX_IDLE_STEERS} steering attempts — goal substantially achieved)`
+          : "";
+        ctx.ui.notify(`Supervisor: outcome achieved! "${snap.outcome}"${suffix}`, "info");
+        state.stop();
+        updateUI(ctx, state.getState());
+      } else {
+        updateUI(ctx, state.getState(), { type: "watching" });
+      }
+    }).catch(() => {
+      // Analysis failed — update UI to watching state so it doesn't stick on "analyzing"
       updateUI(ctx, state.getState(), { type: "watching" });
-    }
+    });
   });
 
   // ---- /supervise command ----
