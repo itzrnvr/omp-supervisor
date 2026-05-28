@@ -24,14 +24,12 @@ import type { Sensitivity } from "./types";
  * Works on incomplete JSON while the model is still generating.
  */
 function extractThinking(accumulated: string): string {
-  // Find the "reasoning" key and capture content after the opening quote
   const keyIdx = accumulated.indexOf('"reasoning"');
   if (keyIdx === -1) return "";
   const after = accumulated.slice(keyIdx + '"reasoning"'.length);
   const openMatch = after.match(/^\s*:\s*"/);
   if (!openMatch) return "";
   const content = after.slice(openMatch[0].length);
-  // If the closing quote has arrived, take only what's inside; otherwise take all (streaming)
   const closeIdx = content.search(/(?<!\\)"/);
   const raw = closeIdx === -1 ? content : content.slice(0, closeIdx);
   return raw.replace(/\\n/g, " ").replace(/\\"/g, '"').trim();
@@ -56,13 +54,10 @@ export default function (pi: ExtensionAPI) {
   const state = new SupervisorStateManager(pi);
   let currentCtx: ExtensionContext | undefined;
 
-  let idleSteers = 0; // consecutive agent_end steers; reset on done/stop/new supervision
+  let idleSteers = 0;
+  let analysisInFlight = false; // prevents concurrent/duplicate steering
 
   // ---- Message delivery ----
-  // Uses pi.sendUserMessage directly (OMP preserves this API).
-  //   turn_end (mid-conversation): deliverAs "steer"
-  //   agent_end (agent idle):      no deliverAs (default prompt delivery)
-
 
   // ---- Session lifecycle: restore state ----
 
@@ -84,15 +79,10 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ---- Mid-turn steering: medium and high sensitivity ----
-  // turn_end fires after each LLM sub-turn (tool-call cycle) while the agent is still running.
-  // low:    no mid-run checks at all
-  // medium: check every 3rd tool cycle (turns 2, 5, 8, …), confidence >= 0.9
-  // high:   check every tool cycle from turn 2, confidence >= 0.85
   //
   // IMPORTANT: OMP enforces a 30-second timeout on extension event handlers.
   // The analyze() call makes a real LLM API request which can take >30s,
-  // so we run it in a detached async context — the handler returns immediately
-  // and the analysis + steering completes independently.
+  // so we run it in a detached async context (fire-and-forget with guards).
 
   pi.on("turn_end", async (event, ctx) => {
     currentCtx = ctx;
@@ -102,12 +92,13 @@ export default function (pi: ExtensionAPI) {
     if (s.sensitivity === "low") return;
     if (event.turnIndex < 2) return;
     if (s.sensitivity === "medium" && (event.turnIndex - 2) % 3 !== 0) return;
+    if (analysisInFlight) return; // prevent concurrent analysis
 
-    // Snapshot values for the detached closure
     const snap = { turnCount: s.turnCount, sensitivity: s.sensitivity };
+    analysisInFlight = true;
 
-    // Fire-and-forget: analysis runs outside the handler timeout
     analyze(ctx, s, false, false, timeoutSignal(SUPERVISOR_TIMEOUT_MS)).then((decision) => {
+      if (!state.isActive()) return; // guard: stopped while in-flight
       const threshold = snap.sensitivity === "medium" ? 0.9 : 0.85;
       if (decision.action === "steer" && decision.message && decision.confidence >= threshold) {
         state.addIntervention({
@@ -120,13 +111,13 @@ export default function (pi: ExtensionAPI) {
         pi.sendUserMessage(decision.message, { deliverAs: "steer" });
       }
     }).catch(() => {
-      // Analysis failed — silently continue; agent will be rechecked at agent_end
+      // Analysis failed or timed out — silently continue
+    }).finally(() => {
+      analysisInFlight = false;
     });
   });
 
   // ---- After each agent run: analyze + steer ----
-  // agent_end fires once per user prompt, always with the agent idle and waiting for input.
-  // This is the critical checkpoint for all sensitivity levels.
 
   pi.on("agent_end", async (_event: any, ctx: any) => {
     currentCtx = ctx;
@@ -138,18 +129,17 @@ export default function (pi: ExtensionAPI) {
 
     updateUI(ctx, s, { type: "analyzing", turn: s.turnCount });
 
-    // Snapshot values for the detached closure
-    const snap = {
-      turnCount: s.turnCount,
-      outcome: s.outcome,
-      stagnating,
-    };
+    const snap = { turnCount: s.turnCount, outcome: s.outcome, stagnating };
+    analysisInFlight = true;
 
-    // Fire-and-forget: analysis runs outside the handler timeout
     analyze(ctx, s, true, stagnating, timeoutSignal(SUPERVISOR_TIMEOUT_MS), (accumulated) => {
       const thinking = extractThinking(accumulated);
       updateUI(ctx, state.getState()!, { type: "analyzing", turn: snap.turnCount, thinking });
     }).then((decision) => {
+      if (!state.isActive()) { // guard: stopped while in-flight
+        updateUI(ctx, state.getState());
+        return;
+      }
       if (decision.action === "steer" && decision.message) {
         idleSteers++;
         state.addIntervention({
@@ -173,8 +163,9 @@ export default function (pi: ExtensionAPI) {
         updateUI(ctx, state.getState(), { type: "watching" });
       }
     }).catch(() => {
-      // Analysis failed — update UI to watching state so it doesn't stick on "analyzing"
       updateUI(ctx, state.getState(), { type: "watching" });
+    }).finally(() => {
+      analysisInFlight = false;
     });
   });
 
@@ -183,7 +174,6 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("supervise", {
     description: "Supervise the chat toward a desired outcome (/supervise <outcome>)",
     getArgumentCompletions: (prefix: string) => {
-      // Second-level: /supervise sensitivity <low|medium|high>
       if (prefix.startsWith("sensitivity ")) {
         const sub = prefix.slice("sensitivity ".length).toLowerCase();
         const levels = [
@@ -194,11 +184,7 @@ export default function (pi: ExtensionAPI) {
         const matches = levels.filter(l => l.value.startsWith(sub));
         return matches.length > 0 ? matches : null;
       }
-
-      // Second-level: /supervise model <provider/modelId> — too dynamic to enumerate, skip
       if (prefix.includes(" ")) return null;
-
-      // First-level: /supervise <subcommand>
       const subcommands = [
         { name: "stop", description: "Stop active supervision" },
         { name: "status", description: "Show current state / open settings" },
@@ -217,13 +203,9 @@ export default function (pi: ExtensionAPI) {
       currentCtx = ctx;
       const trimmed = args?.trim() ?? "";
 
-      // --- subcommands ---
-
       if (trimmed === "widget") {
         const visible = toggleWidget();
-        if (state.isActive()) {
-          updateUI(ctx, state.getState());
-        }
+        if (state.isActive()) updateUI(ctx, state.getState());
         ctx.ui.notify(`Supervisor widget ${visible ? "shown" : "hidden"}.`, "info");
         return;
       }
@@ -246,7 +228,6 @@ export default function (pi: ExtensionAPI) {
           ctx.ui.notify("No active supervision. Use /supervise <outcome> to start.", "info");
           return;
         }
-        // Open the interactive settings panel (same as bare /supervise)
         const result = await openSettings(ctx, s, DEFAULT_PROVIDER, DEFAULT_MODEL_ID, DEFAULT_SENSITIVITY);
         if (result?.model) {
           if (state.isActive()) state.setModel(result.model.provider, result.model.modelId);
@@ -260,13 +241,12 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (trimmed === "model" || trimmed.startsWith("model ")) {
-        const spec = trimmed.slice(5).trim(); // "" when no args
+        const spec = trimmed.slice(5).trim();
 
         if (!spec) {
-          // No args → open the interactive pi-style model picker
           const s = state.getState();
           const picked = await pickModel(ctx, s?.provider, s?.modelId);
-          if (!picked) return; // user cancelled
+          if (!picked) return;
 
           const provider = picked.provider;
           const modelId = picked.id;
@@ -284,7 +264,6 @@ export default function (pi: ExtensionAPI) {
           return;
         }
 
-        // Args provided → direct assignment (for scripting)
         const slashIdx = spec.indexOf("/");
         let provider: string;
         let modelId: string;
@@ -330,14 +309,11 @@ export default function (pi: ExtensionAPI) {
       if (!trimmed || trimmed === "settings") {
         const s = state.getState();
         const result = await openSettings(ctx, s, DEFAULT_PROVIDER, DEFAULT_MODEL_ID, DEFAULT_SENSITIVITY);
-        if (!result) return; // user cancelled with no changes
+        if (!result) return;
 
-        // Apply model change
         if (result.model) {
           const { provider: p, modelId: m } = result.model;
-          if (state.isActive()) {
-            state.setModel(p, m);
-          }
+          if (state.isActive()) state.setModel(p, m);
           const saved = saveWorkspaceModel(ctx.cwd, p, m);
           ctx.ui.notify(
             `Supervisor model set to ${p}/${m}${state.isActive() ? "" : " (takes effect on next /supervise)"}` +
@@ -346,23 +322,16 @@ export default function (pi: ExtensionAPI) {
           );
         }
 
-        // Apply sensitivity change
         if (result.sensitivity) {
-          if (state.isActive()) {
-            state.setSensitivity(result.sensitivity);
-          }
+          if (state.isActive()) state.setSensitivity(result.sensitivity);
           ctx.ui.notify(`Supervisor sensitivity set to "${result.sensitivity}"`, "info");
         }
 
-        // Apply widget toggle
         if (result.widget !== undefined) {
           const currentlyVisible = isWidgetVisible();
-          if (result.widget !== currentlyVisible) {
-            toggleWidget();
-          }
+          if (result.widget !== currentlyVisible) toggleWidget();
         }
 
-        // Apply stop action
         if (result.action === "stop" && state.isActive()) {
           state.stop();
           idleSteers = 0;
@@ -373,7 +342,7 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      // Resolve model settings: session state → workspace config → active session model → built-in defaults
+      // Resolve model settings
       const existing = state.getState();
       const workspaceModel = loadWorkspaceModel(ctx.cwd);
       const sessionModel = ctx.model;
@@ -381,13 +350,12 @@ export default function (pi: ExtensionAPI) {
       let modelId  = existing?.modelId  ?? workspaceModel?.modelId  ?? sessionModel?.id      ?? DEFAULT_MODEL_ID;
       const sensitivity = existing?.sensitivity ?? DEFAULT_SENSITIVITY;
 
-      // Only prompt for a model if none has been configured yet
       if (!existing) {
         const apiKey = await ctx.modelRegistry.getApiKeyForProvider(provider);
         if (!apiKey) {
           ctx.ui.notify(`No API key for "${provider}/${modelId}" — pick a model with an available key.`, "warning");
           const picked = await pickModel(ctx, provider, modelId);
-          if (!picked) return; // user cancelled
+          if (!picked) return;
           provider = picked.provider;
           modelId = picked.id;
         }
@@ -395,6 +363,7 @@ export default function (pi: ExtensionAPI) {
 
       state.start(trimmed, provider, modelId, sensitivity);
       idleSteers = 0;
+      analysisInFlight = false;
       updateUI(ctx, state.getState());
 
       const { source } = loadSystemPrompt(ctx.cwd);
@@ -436,7 +405,6 @@ export default function (pi: ExtensionAPI) {
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
       const text = (msg: string) => ({ content: [{ type: "text" as const, text: msg }], details: undefined });
 
-      // Guard: supervision already active — model cannot modify it
       if (state.isActive()) {
         const s = state.getState()!;
         return text(
@@ -446,10 +414,8 @@ export default function (pi: ExtensionAPI) {
         );
       }
 
-      // Resolve sensitivity
       const sensitivity: Sensitivity = params.sensitivity ?? DEFAULT_SENSITIVITY;
 
-      // Resolve model: tool param → workspace config → active session model → built-in default
       let provider: string;
       let modelId: string;
       if (params.model) {
@@ -465,13 +431,13 @@ export default function (pi: ExtensionAPI) {
 
       state.start(params.outcome, provider, modelId, sensitivity);
       idleSteers = 0;
+      analysisInFlight = false;
       currentCtx = ctx;
       updateUI(ctx, state.getState());
 
       const { source } = loadSystemPrompt(ctx.cwd);
       const promptLabel = source === "built-in" ? "built-in prompt" : ".pi/SUPERVISOR.md";
 
-      // Notify the user so they're aware supervision was initiated by the model
       ctx.ui.notify(
         `Supervisor started by agent: "${params.outcome.slice(0, 60)}${params.outcome.length > 60 ? "…" : ""}" | ${provider}/${modelId} | sensitivity: ${sensitivity} | ${promptLabel}`,
         "info"
