@@ -40,6 +40,17 @@ function extractThinking(accumulated: string): string {
 // After this many consecutive idle-state steers with no "done", run a lenient final evaluation.
 const MAX_IDLE_STEERS = 5;
 
+// Maximum time to wait for the supervisor model to respond before giving up.
+// This runs OUTSIDE OMP's 30s handler timeout (fire-and-forget), so it can be longer.
+// Set to 0 to disable (wait forever).
+const SUPERVISOR_TIMEOUT_MS = 120_000; // 2 minutes
+
+/** Create an AbortSignal that aborts after ms milliseconds, or never if ms is 0. */
+function timeoutSignal(ms: number): AbortSignal {
+  if (ms <= 0) return new AbortController().signal;
+  return AbortSignal.timeout(ms);
+}
+
 export default function (pi: ExtensionAPI) {
   const z = pi.zod;
   const state = new SupervisorStateManager(pi);
@@ -96,7 +107,7 @@ export default function (pi: ExtensionAPI) {
     const snap = { turnCount: s.turnCount, sensitivity: s.sensitivity };
 
     // Fire-and-forget: analysis runs outside the handler timeout
-    analyze(ctx, s, false, false).then((decision) => {
+    analyze(ctx, s, false, false, timeoutSignal(SUPERVISOR_TIMEOUT_MS)).then((decision) => {
       const threshold = snap.sensitivity === "medium" ? 0.9 : 0.85;
       if (decision.action === "steer" && decision.message && decision.confidence >= threshold) {
         state.addIntervention({
@@ -135,7 +146,7 @@ export default function (pi: ExtensionAPI) {
     };
 
     // Fire-and-forget: analysis runs outside the handler timeout
-    analyze(ctx, s, true, stagnating, undefined, (accumulated) => {
+    analyze(ctx, s, true, stagnating, timeoutSignal(SUPERVISOR_TIMEOUT_MS), (accumulated) => {
       const thinking = extractThinking(accumulated);
       updateUI(ctx, state.getState()!, { type: "analyzing", turn: snap.turnCount, thinking });
     }).then((decision) => {
